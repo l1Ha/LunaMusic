@@ -1,0 +1,111 @@
+package com.luna.music.data
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+
+/**
+ * App 内更新：从 GitHub Releases 检查最新版本、下载 APK 并唤起安装。
+ */
+object UpdateManager {
+
+    const val REPO = "l1Ha/LunaMusic"
+    private const val API = "https://api.github.com/repos/$REPO/releases/latest"
+
+    data class Release(
+        val version: String,
+        val name: String,
+        val downloadUrl: String,
+        val size: Long,
+    )
+
+    sealed interface UpdateStatus {
+        data object Idle : UpdateStatus
+        data object Checking : UpdateStatus
+        data object UpToDate : UpdateStatus
+        data class Available(val release: Release) : UpdateStatus
+        data object Downloading : UpdateStatus
+        data class Ready(val file: File) : UpdateStatus
+        data class Error(val message: String) : UpdateStatus
+    }
+
+    suspend fun check(): Release? = withContext(Dispatchers.IO) {
+        runCatching {
+            val conn = URL(API).openConnection() as HttpURLConnection
+            conn.setRequestProperty("Accept", "application/vnd.github+json")
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 15_000
+            if (conn.responseCode != 200) return@runCatching null
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(body)
+            val tag = json.optString("tag_name")
+            val assets = json.optJSONArray("assets") ?: return@runCatching null
+            var apk: JSONObject? = null
+            for (i in 0 until assets.length()) {
+                val a = assets.getJSONObject(i)
+                if (a.optString("name").endsWith(".apk")) {
+                    apk = a
+                    break
+                }
+            }
+            apk ?: return@runCatching null
+            Release(
+                version = tag.removePrefix("v"),
+                name = json.optString("name").ifBlank { tag },
+                downloadUrl = apk.optString("browser_download_url"),
+                size = apk.optLong("size"),
+            )
+        }.getOrNull()
+    }
+
+    suspend fun download(context: Context, release: Release): File? = withContext(Dispatchers.IO) {
+        runCatching {
+            val dir = File(context.cacheDir, "updates").apply { mkdirs() }
+            val file = File(dir, "LunaMusic-${release.version}.apk")
+            val conn = URL(release.downloadUrl).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 120_000
+            conn.inputStream.use { input ->
+                file.outputStream().use { output -> input.copyTo(output) }
+            }
+            file.takeIf { it.length() > 0 }
+        }.getOrNull()
+    }
+
+    fun installApk(context: Context, file: File): Boolean {
+        return runCatching {
+            val uri: Uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file,
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    }
+
+    /** 语义化版本比较：a > b 返回正数。 */
+    fun compareVersion(a: String, b: String): Int {
+        val pa = a.split('.').mapNotNull { it.toIntOrNull() }
+        val pb = b.split('.').mapNotNull { it.toIntOrNull() }
+        val n = maxOf(pa.size, pb.size)
+        for (i in 0 until n) {
+            val va = pa.getOrElse(i) { 0 }
+            val vb = pb.getOrElse(i) { 0 }
+            if (va != vb) return va - vb
+        }
+        return 0
+    }
+}

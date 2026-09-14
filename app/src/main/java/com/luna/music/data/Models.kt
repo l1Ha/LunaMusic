@@ -21,6 +21,9 @@ data class Song(
 
     val fileName: String
         get() = path.substringAfterLast('/')
+
+    val folder: String
+        get() = path.substringBeforeLast('/', "")
 }
 
 data class Album(
@@ -38,6 +41,12 @@ data class Artist(
     val name: String,
     val songCount: Int,
     val albumCount: Int,
+)
+
+data class Folder(
+    val path: String,
+    val name: String,
+    val songCount: Int,
 )
 
 @Serializable

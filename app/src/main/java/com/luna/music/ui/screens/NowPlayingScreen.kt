@@ -94,7 +94,9 @@ fun NowPlayingScreen(
     val repeatMode by PlayerBridge.repeatMode.collectAsState()
     val queue by PlayerBridge.queue.collectAsState()
     val sleepRemaining by PlayerBridge.sleepRemainingMs.collectAsState()
+    val stopAfterCurrent by PlayerBridge.stopAfterCurrent.collectAsState()
     val speed by PlayerBridge.speed.collectAsState()
+    val nowIndex by PlayerBridge.currentIndex.collectAsState()
 
     var showLyrics by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<NPSheet?>(null) }
@@ -275,16 +277,21 @@ fun NowPlayingScreen(
                                 TextButton(onClick = { showLyrics = true }) { Text("词") }
                                 TextButton(onClick = { sheet = NPSheet.SPEED }) { Text("%.1fx".format(speed)) }
                                 TextButton(onClick = { sheet = NPSheet.SLEEP }) {
+                                    val sleepActive = sleepRemaining != null || stopAfterCurrent
                                     Icon(
                                         Icons.Rounded.Bedtime,
                                         contentDescription = null,
                                         modifier = Modifier.size(18.dp),
-                                        tint = if (sleepRemaining != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (sleepActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    if (sleepRemaining != null) {
+                                    if (sleepActive) {
                                         Spacer(Modifier.width(4.dp))
                                         Text(
-                                            PlayerBridge.formatSleepRemaining(sleepRemaining ?: 0L),
+                                            if (sleepRemaining != null) {
+                                                PlayerBridge.formatSleepRemaining(sleepRemaining ?: 0L)
+                                            } else {
+                                                "播完本曲"
+                                            },
                                             color = MaterialTheme.colorScheme.primary,
                                             style = MaterialTheme.typography.labelMedium,
                                         )
@@ -334,15 +341,28 @@ fun NowPlayingScreen(
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
                 )
             }
+            if (stopAfterCurrent) {
+                Text(
+                    "将在播完当前歌曲后暂停",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
+                )
+            }
             listOf(10, 20, 30, 45, 60, 90).forEach { minutes ->
                 SheetOptionRow(text = "$minutes 分钟") {
                     PlayerBridge.startSleepTimer(minutes * 60_000L)
                     sheet = null
                 }
             }
-            if (sleepRemaining != null) {
+            SheetOptionRow(text = "当前歌曲播完后停止", selected = stopAfterCurrent) {
+                PlayerBridge.setStopAfterCurrent(true)
+                sheet = null
+            }
+            if (sleepRemaining != null || stopAfterCurrent) {
                 SheetOptionRow(text = "取消定时", selected = false) {
                     PlayerBridge.cancelSleepTimer()
+                    PlayerBridge.setStopAfterCurrent(false)
                     sheet = null
                 }
             }
@@ -350,7 +370,6 @@ fun NowPlayingScreen(
         }
         NPSheet.QUEUE -> ModalBottomSheet(onDismissRequest = { sheet = null }) {
             SheetTitle("播放队列（${queue.size} 首）")
-            val currentIndex = PlayerBridge.currentIndex
             LazyColumn(
                 Modifier
                     .fillMaxWidth()
@@ -377,7 +396,7 @@ fun NowPlayingScreen(
                             Text(
                                 item.title,
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = if (index == currentIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                color = if (index == nowIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )

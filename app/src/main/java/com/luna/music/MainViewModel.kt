@@ -45,7 +45,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onPermissionGranted() {
         if (_hasPermission.value) return
         _hasPermission.value = true
-        viewModelScope.launch { MediaRepository.scan(getApplication()) }
+        viewModelScope.launch {
+            MediaRepository.scan(getApplication())
+            PlayerBridge.restoreSavedQueue()
+        }
     }
 
     fun rescan() {

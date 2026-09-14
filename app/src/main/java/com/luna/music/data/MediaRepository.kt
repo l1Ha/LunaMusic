@@ -126,4 +126,15 @@ object MediaRepository {
     fun songsOfArtist(artistId: Long): List<Song> =
         _songs.value.filter { it.artistId == artistId }
             .sortedWith(compareBy({ it.album.lowercase() }, { it.track }, { it.title.lowercase() }))
+
+    fun foldersOf(songs: List<Song>): List<Folder> =
+        songs.groupBy { it.folder }
+            .map { (path, list) ->
+                Folder(path = path, name = path.substringAfterLast('/').ifBlank { "/" }, songCount = list.size)
+            }
+            .sortedBy { it.name.lowercase() }
+
+    fun songsOfFolder(path: String): List<Song> =
+        _songs.value.filter { it.folder == path }
+            .sortedWith(compareBy { it.fileName.lowercase() })
 }

@@ -13,8 +13,13 @@ android {
         applicationId = "com.luna.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
+
+        ndk {
+            // 只保留手机主流 ABI（arm64），避免 FFmpeg 原生库让 APK 翻倍
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -32,10 +37,13 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // JavaCPP 的 GraalVM native-image 配置在 Android 上无用，且会在多 ABI 间重复
+            excludes += "/META-INF/native-image/**"
         }
     }
 }
@@ -59,4 +67,23 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // FFmpeg（JavaCV）——用于 WMA / APE 等格式的本机转码
+    implementation("org.bytedeco:javacv:1.5.10") {
+        exclude(group = "org.bytedeco", module = "opencv")
+        exclude(group = "org.bytedeco", module = "openblas")
+        exclude(group = "org.bytedeco", module = "flycapture")
+        exclude(group = "org.bytedeco", module = "libdc1394")
+        exclude(group = "org.bytedeco", module = "libfreenect")
+        exclude(group = "org.bytedeco", module = "libfreenect2")
+        exclude(group = "org.bytedeco", module = "librealsense")
+        exclude(group = "org.bytedeco", module = "librealsense2")
+        exclude(group = "org.bytedeco", module = "videoinput")
+        exclude(group = "org.bytedeco", module = "artoolkitplus")
+        exclude(group = "org.bytedeco", module = "leptonica")
+        exclude(group = "org.bytedeco", module = "tesseract")
+    }
+    implementation("org.bytedeco:ffmpeg:6.1.1-1.5.10")
+    runtimeOnly("org.bytedeco:ffmpeg:6.1.1-1.5.10:android-arm64")
+    runtimeOnly("org.bytedeco:javacpp:1.5.10:android-arm64")
 }

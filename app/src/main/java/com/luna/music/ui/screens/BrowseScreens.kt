@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.luna.music.MainViewModel
 import com.luna.music.data.Album
 import com.luna.music.data.Artist
+import com.luna.music.data.Folder
 import com.luna.music.data.Song
 import com.luna.music.playback.PlayerBridge
 import com.luna.music.ui.components.CoverImage
@@ -264,6 +266,107 @@ fun ArtistDetailScreen(
                         isCurrent = currentSong?.id == song.id,
                         isFavorite = song.id in favorites,
                         onClick = { PlayerBridge.playQueue(artistSongs, artistSongs.indexOf(song)) },
+                        onAction = { onAction(song) },
+                        onFavoriteToggle = { vm.toggleFavorite(song.id) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FoldersScreen(folders: List<Folder>, onOpenFolder: (Folder) -> Unit) {
+    if (folders.isEmpty()) {
+        EmptyState(Icons.Rounded.Folder, "没有文件夹", "扫描到音乐后会显示在这里")
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(folders, key = { it.path }) { folder ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenFolder(folder) }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Folder,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(30.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "${folder.songCount} 首 · ${folder.path}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FolderDetailScreen(
+    vm: MainViewModel,
+    folderPath: String,
+    onBack: () -> Unit,
+    onAction: (Song) -> Unit,
+) {
+    val allSongs by vm.songs.collectAsState()
+    val folderSongs = remember(allSongs, folderPath) {
+        allSongs.filter { it.folder == folderPath }
+            .sortedWith(compareBy { it.fileName.lowercase() })
+    }
+    val folderName = folderPath.substringAfterLast('/').ifBlank { "/" }
+    val favorites by vm.favorites.collectAsState()
+    val currentSong by PlayerBridge.currentSong.collectAsState()
+
+    Column(Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text(folderName) },
+            navigationIcon = {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") }
+            },
+        )
+        if (folderSongs.isEmpty()) {
+            EmptyState(Icons.Rounded.Folder, "该文件夹没有音乐")
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                item {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "${folderSongs.size} 首",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "播放全部",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.clickable { PlayerBridge.playQueue(folderSongs, 0) },
+                        )
+                    }
+                }
+                items(folderSongs, key = { it.id }) { song ->
+                    SongRow(
+                        song = song,
+                        isCurrent = currentSong?.id == song.id,
+                        isFavorite = song.id in favorites,
+                        onClick = { PlayerBridge.playQueue(folderSongs, folderSongs.indexOf(song)) },
                         onAction = { onAction(song) },
                         onFavoriteToggle = { vm.toggleFavorite(song.id) },
                     )

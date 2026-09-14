@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MusicNote
@@ -65,6 +67,8 @@ import com.luna.music.ui.screens.AlbumsScreen
 import com.luna.music.ui.screens.ArtistDetailScreen
 import com.luna.music.ui.screens.ArtistsScreen
 import com.luna.music.ui.screens.FavoritesScreen
+import com.luna.music.ui.screens.FolderDetailScreen
+import com.luna.music.ui.screens.FoldersScreen
 import com.luna.music.ui.screens.NowPlayingScreen
 import com.luna.music.ui.screens.PlaylistDetailScreen
 import com.luna.music.ui.screens.PlaylistsScreen
@@ -77,6 +81,7 @@ import kotlinx.coroutines.delay
 sealed interface Detail {
     data class AlbumDetail(val albumId: Long) : Detail
     data class ArtistDetail(val artistId: Long) : Detail
+    data class FolderDetail(val path: String) : Detail
     data class PlaylistDetail(val playlistId: Long) : Detail
     data object Favorites : Detail
     data object Search : Detail
@@ -102,6 +107,7 @@ fun AppRoot(vm: MainViewModel) {
     }
     val albums = remember(songs) { com.luna.music.data.MediaRepository.albumsOf(songs) }
     val artists = remember(songs) { com.luna.music.data.MediaRepository.artistsOf(songs) }
+    val folders = remember(songs) { com.luna.music.data.MediaRepository.foldersOf(songs) }
 
     var tab by rememberSaveable { mutableStateOf(0) }
     var detail by remember { mutableStateOf<Detail?>(null) }
@@ -112,12 +118,20 @@ fun AppRoot(vm: MainViewModel) {
     val currentSong by PlayerBridge.currentSong.collectAsState()
     val isPlaying by PlayerBridge.isPlaying.collectAsState()
     val playbackError by PlayerBridge.error.collectAsState()
+    val playbackToast by PlayerBridge.toast.collectAsState()
     val toastContext = androidx.compose.ui.platform.LocalContext.current
 
     androidx.compose.runtime.LaunchedEffect(playbackError) {
         playbackError?.let {
             android.widget.Toast.makeText(toastContext, it, android.widget.Toast.LENGTH_LONG).show()
             PlayerBridge.clearError()
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(playbackToast) {
+        playbackToast?.let {
+            android.widget.Toast.makeText(toastContext, it, android.widget.Toast.LENGTH_LONG).show()
+            PlayerBridge.clearToast()
         }
     }
     val positionMs by produceState(0L, currentSong?.id, isPlaying) {
@@ -157,11 +171,12 @@ fun AppRoot(vm: MainViewModel) {
                             )
                         }
                         NavigationBar {
-                            val tabs = listOf("音乐", "专辑", "歌手", "列表")
+                            val tabs = listOf("音乐", "专辑", "歌手", "文件夹", "列表")
                             val icons = listOf(
                                 Icons.Rounded.MusicNote,
                                 Icons.Rounded.Album,
                                 Icons.Rounded.Person,
+                                Icons.Rounded.Folder,
                                 Icons.AutoMirrored.Rounded.QueueMusic,
                             )
                             tabs.forEachIndexed { index, label ->
@@ -201,6 +216,10 @@ fun AppRoot(vm: MainViewModel) {
                                 artists = artists,
                                 onOpenArtist = { openDetail(Detail.ArtistDetail(it.id)) },
                             )
+                            3 -> FoldersScreen(
+                                folders = folders,
+                                onOpenFolder = { openDetail(Detail.FolderDetail(it.path)) },
+                            )
                             else -> PlaylistsScreen(
                                 vm = vm,
                                 favoritesCount = favorites.size,
@@ -217,6 +236,12 @@ fun AppRoot(vm: MainViewModel) {
                         is Detail.ArtistDetail -> ArtistDetailScreen(
                             vm = vm,
                             artistId = d.artistId,
+                            onBack = { detail = null },
+                            onAction = ::openSongAction,
+                        )
+                        is Detail.FolderDetail -> FolderDetailScreen(
+                            vm = vm,
+                            folderPath = d.path,
                             onBack = { detail = null },
                             onAction = ::openSongAction,
                         )
@@ -396,6 +421,7 @@ private fun SongActionSheet(
             }
             Spacer(Modifier.height(8.dp))
             SheetAction(Icons.Rounded.PlayArrow, "播放") { PlayerBridge.playQueue(listOf(song), 0); onDismiss() }
+            SheetAction(Icons.AutoMirrored.Rounded.PlaylistAdd, "下一首播放") { PlayerBridge.playNext(song); onDismiss() }
             SheetAction(
                 if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 if (isFavorite) "取消收藏" else "收藏",
