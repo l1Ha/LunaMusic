@@ -63,6 +63,7 @@ data class AppSettings(
     val dynamicColor: Boolean = true,
     val sortMode: SortMode = SortMode.TITLE,
     val sortAsc: Boolean = true,
+    val scanFolders: List<String> = emptyList(),
 )
 
 enum class ThemeMode(val label: String) {

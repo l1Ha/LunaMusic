@@ -73,6 +73,7 @@ import com.luna.music.ui.screens.NowPlayingScreen
 import com.luna.music.ui.screens.PlaylistDetailScreen
 import com.luna.music.ui.screens.PlaylistsScreen
 import com.luna.music.ui.screens.SearchScreen
+import com.luna.music.ui.screens.ScanFoldersScreen
 import com.luna.music.ui.screens.SettingsScreen
 import com.luna.music.ui.screens.SongsScreen
 import com.luna.music.ui.screens.EqualizerScreen
@@ -87,6 +88,7 @@ sealed interface Detail {
     data object Search : Detail
     data object Settings : Detail
     data object Equalizer : Detail
+    data object ScanFolders : Detail
 }
 
 @Composable
@@ -266,8 +268,13 @@ fun AppRoot(vm: MainViewModel) {
                         Detail.Settings -> SettingsScreen(
                             vm = vm,
                             onBack = { detail = null },
+                            onOpenScanFolders = { openDetail(Detail.ScanFolders) },
                         )
                         Detail.Equalizer -> EqualizerScreen(
+                            onBack = { detail = null },
+                        )
+                        Detail.ScanFolders -> ScanFoldersScreen(
+                            vm = vm,
                             onBack = { detail = null },
                         )
                     }

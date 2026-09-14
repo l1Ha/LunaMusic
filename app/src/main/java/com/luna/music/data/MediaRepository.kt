@@ -19,17 +19,22 @@ object MediaRepository {
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
-    suspend fun scan(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun scan(context: Context, folderFilter: List<String> = emptyList()) = withContext(Dispatchers.IO) {
         if (_isScanning.value) return@withContext
         _isScanning.value = true
         try {
-            _songs.value = querySongs(context)
+            _songs.value = querySongs(context, folderFilter)
         } finally {
             _isScanning.value = false
         }
     }
 
-    private fun querySongs(context: Context): List<Song> {
+    /** 列出（未过滤的）所有音频所在文件夹，供“指定扫描文件夹”使用。 */
+    suspend fun discoverFolders(context: Context): List<Folder> = withContext(Dispatchers.IO) {
+        foldersOf(querySongs(context))
+    }
+
+    private fun querySongs(context: Context, folderFilter: List<String> = emptyList()): List<Song> {
         val result = mutableListOf<Song>()
         val collection =
             if (Build.VERSION.SDK_INT >= 29) {
@@ -50,12 +55,21 @@ object MediaRepository {
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.DATA,
         )
-        val selection =
-            "(${MediaStore.Audio.Media.IS_MUSIC} != 0" +
-                " OR ${MediaStore.Audio.Media.DATA} LIKE '%.wma'" +
-                " OR ${MediaStore.Audio.Media.DATA} LIKE '%.ape'" +
-                " OR ${MediaStore.Audio.Media.DATA} LIKE '%.wv')" +
-                " AND ${MediaStore.Audio.Media.DURATION} >= 30000"
+        val selection = buildString {
+            append("(${MediaStore.Audio.Media.IS_MUSIC} != 0")
+            append(" OR ${MediaStore.Audio.Media.DATA} LIKE '%.wma'")
+            append(" OR ${MediaStore.Audio.Media.DATA} LIKE '%.ape'")
+            append(" OR ${MediaStore.Audio.Media.DATA} LIKE '%.wv')")
+            append(" AND ${MediaStore.Audio.Media.DURATION} >= 30000")
+            if (folderFilter.isNotEmpty()) {
+                append(" AND (")
+                folderFilter.forEachIndexed { index, path ->
+                    if (index > 0) append(" OR ")
+                    append("${MediaStore.Audio.Media.DATA} LIKE '${path.replace("'", "''")}%'")
+                }
+                append(")")
+            }
+        }
         val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
 
         context.contentResolver.query(collection, projection, selection, null, sortOrder)?.use { c ->

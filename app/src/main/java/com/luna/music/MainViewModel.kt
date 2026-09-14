@@ -46,13 +46,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_hasPermission.value) return
         _hasPermission.value = true
         viewModelScope.launch {
-            MediaRepository.scan(getApplication())
+            MediaRepository.scan(getApplication(), _settings.value.scanFolders)
             PlayerBridge.restoreSavedQueue()
         }
     }
 
     fun rescan() {
-        viewModelScope.launch { MediaRepository.scan(getApplication()) }
+        viewModelScope.launch { MediaRepository.scan(getApplication(), _settings.value.scanFolders) }
+    }
+
+    fun addScanFolder(path: String) {
+        updateSettings { it.copy(scanFolders = (it.scanFolders + path).distinct()) }
+        rescan()
+    }
+
+    fun removeScanFolder(path: String) {
+        updateSettings { it.copy(scanFolders = it.scanFolders - path) }
+        rescan()
+    }
+
+    fun clearScanFolders() {
+        updateSettings { it.copy(scanFolders = emptyList()) }
+        rescan()
     }
 
     fun updateSettings(transform: (AppSettings) -> AppSettings) {

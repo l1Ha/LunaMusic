@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
+fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenScanFolders: () -> Unit) {
     val settings by vm.settings.collectAsState()
     val isScanning by vm.isScanning.collectAsState()
     val songCount by vm.songs.collectAsState()
@@ -125,6 +125,24 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 } else {
                     OutlinedButton(onClick = { vm.rescan() }) { Text("重新扫描") }
                 }
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenScanFolders)
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("扫描文件夹", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        if (settings.scanFolders.isEmpty()) "扫描全部文件夹"
+                        else "已指定 ${settings.scanFolders.size} 个文件夹",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
