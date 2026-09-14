@@ -13,8 +13,8 @@ android {
         applicationId = "com.luna.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.2.1"
 
         ndk {
             // 只保留手机主流 ABI（arm64），避免 FFmpeg 原生库让 APK 翻倍
@@ -22,8 +22,18 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePass = providers.environmentVariable("LUNA_KEYSTORE_PASS")
+            storeFile = file(System.getProperty("user.home") + "/.luna-keystore/luna-release.keystore")
+            storePassword = keystorePass.getOrElse("missing")
+            keyAlias = "luna"
+            keyPassword = keystorePass.getOrElse("missing")
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
