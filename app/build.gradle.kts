@@ -13,8 +13,8 @@ android {
         applicationId = "com.luna.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5
+        versionName = "1.2.2"
 
         ndk {
             // 只保留手机主流 ABI（arm64），避免 FFmpeg 原生库让 APK 翻倍
@@ -29,6 +29,10 @@ android {
             storePassword = keystorePass.getOrElse("missing")
             keyAlias = "luna"
             keyPassword = keystorePass.getOrElse("missing")
+            // 最大安装兼容性：同时启用 v1(JAR) + v2 签名，
+            // 避免部分文件管理器/旧安装通道对纯 v2 签名报“软件包无效”
+            isV1SigningEnabled = true
+            isV2SigningEnabled = true
         }
     }
     buildTypes {
