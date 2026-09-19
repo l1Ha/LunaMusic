@@ -44,15 +44,26 @@ Android 8.0（API 26）及以上。当前 APK 仅打包 **arm64-v8a**（覆盖�
 
 ## 🚀 下载安装
 
-前往 [Releases](https://github.com/l1Ha/LunaMusic/releases) 下载最新的 `LunaMusic-*.apk`，安装后授予音频访问权限即可使用。
+前往 [Releases](https://github.com/l1Ha/LunaMusic/releases)，按需下载：
+
+| 文件 | 说明 |
+| --- | --- |
+| `LunaMusic-<版本>.apk` | **完整版**（含 FFmpeg，支持 WMA / APE），包名 `com.luna.music` |
+| `LunaMusic-<版本>-lite.apk` | 轻量版（无 FFmpeg，不支持 WMA / APE），包名 `com.luna.music.lite`，可与完整版共存 |
+
+- 安装时如提示"未知来源"，按提示允许浏览器/文件管理器安装应用即可
+- 若安装失败，先核对下载文件大小是否与 Release 页标注一致（网络中断导致的截断文件是最常见原因）；仍失败可用 `adb install -r xxx.apk` 查看具体错误码
+- 安装前请授予音频访问权限
 
 ## 🛠 构建方法
 
 ```bash
 git clone https://github.com/l1Ha/LunaMusic.git
 cd LunaMusic
-./gradlew assembleDebug
-# 产物: app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleFullDebug          # 完整版
+./gradlew assembleLiteDebug          # 轻量版（无 FFmpeg）
+# 产物: app/build/outputs/apk/{full,lite}/debug/*-debug.apk
+# 正式版: ./gradlew assembleFullRelease assembleLiteRelease（需签名配置）
 ```
 
 要求：JDK 17+、Android SDK（compileSdk 35）。Android Studio 直接打开工程即可。
@@ -68,7 +79,7 @@ cd LunaMusic
 | kotlinx.serialization | 播放列表 JSON 序列化 |
 | Coil | 封面图片加载 |
 | androidx.media.audiofx | 均衡器 / 低音增强 / 环绕声 |
-| FFmpegKit | WMA / APE 本地转码为 AAC |
+| JavaCV (FFmpeg 6.1) | WMA / APE 本地转码为 AAC（仅 full 渠道携带） |
 
 ## 📂 目录结构
 

@@ -13,12 +13,24 @@ android {
         applicationId = "com.luna.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.2.2"
+        versionCode = 6
+        versionName = "1.3.0"
 
         ndk {
             // 只保留手机主流 ABI（arm64），避免 FFmpeg 原生库让 APK 翻倍
             abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    // full：完整功能（含 FFmpeg 转码，WMA/APE 可播）
+    // lite：无 FFmpeg 的轻量诊断版（独立包名，可与 full 共存），用于排查安装通道问题
+    flavorDimensions += "variant"
+    productFlavors {
+        create("full") { dimension = "variant" }
+        create("lite") {
+            dimension = "variant"
+            applicationIdSuffix = ".lite"
+            versionNameSuffix = "-lite"
         }
     }
 
@@ -54,6 +66,13 @@ android {
         buildConfig = true
     }
     packaging {
+        // 压缩打包 .so：APK 更小（下载更不易中断截断），且对老设备/各种安装通道兼容性最好
+        jniLibs {
+            useLegacyPackaging = true
+            // JavaCV 附带的命令行工具，代码只用到 JNI 库，剔除省 ~0.5MB
+            excludes += "lib/arm64-v8a/ffmpeg"
+            excludes += "lib/arm64-v8a/ffprobe"
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             // JavaCPP 的 GraalVM native-image 配置在 Android 上无用，且会在多 ABI 间重复
@@ -82,8 +101,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("io.coil-kt:coil-compose:2.7.0")
 
-    // FFmpeg（JavaCV）——用于 WMA / APE 等格式的本机转码
-    implementation("org.bytedeco:javacv:1.5.10") {
+    // FFmpeg（JavaCV）——用于 WMA / APE 等格式的本机转码；仅 full 渠道，lite 不携带
+    "fullImplementation"("org.bytedeco:javacv:1.5.10") {
         exclude(group = "org.bytedeco", module = "opencv")
         exclude(group = "org.bytedeco", module = "openblas")
         exclude(group = "org.bytedeco", module = "flycapture")
@@ -97,7 +116,7 @@ dependencies {
         exclude(group = "org.bytedeco", module = "leptonica")
         exclude(group = "org.bytedeco", module = "tesseract")
     }
-    implementation("org.bytedeco:ffmpeg:6.1.1-1.5.10")
-    runtimeOnly("org.bytedeco:ffmpeg:6.1.1-1.5.10:android-arm64")
-    runtimeOnly("org.bytedeco:javacpp:1.5.10:android-arm64")
+    "fullImplementation"("org.bytedeco:ffmpeg:6.1.1-1.5.10")
+    "fullRuntimeOnly"("org.bytedeco:ffmpeg:6.1.1-1.5.10:android-arm64")
+    "fullRuntimeOnly"("org.bytedeco:javacpp:1.5.10:android-arm64")
 }

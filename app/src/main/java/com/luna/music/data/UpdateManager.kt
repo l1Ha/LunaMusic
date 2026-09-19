@@ -3,6 +3,7 @@ package com.luna.music.data
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -68,18 +69,48 @@ object UpdateManager {
     suspend fun download(context: Context, release: Release): File? = withContext(Dispatchers.IO) {
         runCatching {
             val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-            val file = File(dir, "LunaMusic-${release.version}.apk")
+            val final = File(dir, "LunaMusic-${release.version}.apk")
+            val part = File(dir, final.name + ".part")
             val conn = URL(release.downloadUrl).openConnection() as HttpURLConnection
             conn.connectTimeout = 15_000
             conn.readTimeout = 120_000
             conn.inputStream.use { input ->
-                file.outputStream().use { output -> input.copyTo(output) }
+                part.outputStream().use { output -> input.copyTo(output) }
             }
-            file.takeIf { it.length() > 0 }
+            // 完整性校验：非空 + PK 魔数 + 与 Release 资产大小一致，
+            // 避免截断/损坏的 APK 被送去安装（系统会报“软件包似乎无效”）
+            val ok = part.length() > 0 &&
+                (release.size <= 0 || part.length() == release.size) &&
+                part.inputStream().use { s ->
+                    val head = ByteArray(2)
+                    s.read(head) == 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()
+                }
+            if (ok) {
+                final.delete()
+                part.renameTo(final)
+                final
+            } else {
+                part.delete()
+                null
+            }
         }.getOrNull()
     }
 
     fun installApk(context: Context, file: File): Boolean {
+        // Android 8+ 需要用户先授予“安装未知应用”权限，否则安装界面静默失败
+        if (android.os.Build.VERSION.SDK_INT >= 26 &&
+            !context.packageManager.canRequestPackageInstalls()
+        ) {
+            runCatching {
+                context.startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:${context.packageName}"),
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            return false
+        }
         return runCatching {
             val uri: Uri = FileProvider.getUriForFile(
                 context,
