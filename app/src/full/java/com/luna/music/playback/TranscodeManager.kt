@@ -6,6 +6,8 @@ import com.luna.music.data.Song
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.bytedeco.ffmpeg.global.avcodec
 import org.bytedeco.javacv.FFmpegFrameGrabber
 import org.bytedeco.javacv.FFmpegFrameRecorder
@@ -38,57 +40,66 @@ object TranscodeManager {
         if (isUnsupported(song)) Uri.fromFile(cachedFile(context, song))
         else com.luna.music.data.MediaRepository.uriFor(song.id)
 
-    /** 同步转码（须在 IO 线程调用）。成功返回非空缓存文件，失败返回 null。 */
-    fun transcode(context: Context, song: Song): File? {
+    /** 转码串行化：避免两个协程同时转码，写坏同一个 .part 文件 */
+    private val transcodeMutex = Mutex()
+
+    /**
+     * 转码（挂起函数，内部串行执行）。成功返回非空缓存文件，失败返回 null。
+     * 已有缓存时立即返回；等锁期间被别的协程转完时也会直接命中缓存。
+     */
+    suspend fun transcode(context: Context, song: Song): File? {
         val output = cachedFile(context, song)
         if (output.isFile && output.length() > 0) return output
-        val tmp = File(cacheDir(context), "${song.id}.part.m4a")
-        var grabber: FFmpegFrameGrabber? = null
-        var recorder: FFmpegFrameRecorder? = null
-        return try {
-            _activeIds.value = _activeIds.value + song.id
-            tmp.delete()
+        return transcodeMutex.withLock {
+            if (output.isFile && output.length() > 0) return@withLock output
+            val tmp = File(cacheDir(context), "${song.id}.part.m4a")
+            var grabber: FFmpegFrameGrabber? = null
+            var recorder: FFmpegFrameRecorder? = null
+            try {
+                _activeIds.value = _activeIds.value + song.id
+                tmp.delete()
 
-            grabber = FFmpegFrameGrabber(song.path)
-            grabber.start()
+                grabber = FFmpegFrameGrabber(song.path)
+                grabber.start()
 
-            val channels = grabber.audioChannels.coerceIn(1, 2)
-            val sampleRate = grabber.sampleRate.takeIf { it > 0 } ?: 44_100
+                val channels = grabber.audioChannels.coerceIn(1, 2)
+                val sampleRate = grabber.sampleRate.takeIf { it > 0 } ?: 44_100
 
-            recorder = FFmpegFrameRecorder(tmp.absolutePath, channels)
-            recorder.setFormat("m4a")
-            recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC)
-            recorder.setSampleRate(sampleRate)
-            recorder.setAudioChannels(channels)
-            // 256k：源文件（WMA/APE）本就有损，用高码率把代际损失压到听感以下
-            recorder.setAudioBitrate(256_000)
-            recorder.start()
+                recorder = FFmpegFrameRecorder(tmp.absolutePath, channels)
+                recorder.setFormat("m4a")
+                recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC)
+                recorder.setSampleRate(sampleRate)
+                recorder.setAudioChannels(channels)
+                // 256k：源文件（WMA/APE）本就有损，用高码率把代际损失压到听感以下
+                recorder.setAudioBitrate(256_000)
+                recorder.start()
 
-            var frame: Frame? = grabber.grabFrame()
-            while (frame != null) {
-                if (frame.samples != null) {
-                    recorder.record(frame)
+                var frame: Frame? = grabber.grabFrame()
+                while (frame != null) {
+                    if (frame.samples != null) {
+                        recorder.record(frame)
+                    }
+                    frame = grabber.grabFrame()
                 }
-                frame = grabber.grabFrame()
-            }
 
-            val ok = tmp.isFile && tmp.length() > 0
-            if (ok) {
-                tmp.renameTo(output)
-                output.takeIf { it.length() > 0 }
-            } else {
+                val ok = tmp.isFile && tmp.length() > 0
+                if (ok) {
+                    tmp.renameTo(output)
+                    output.takeIf { it.length() > 0 }
+                } else {
+                    tmp.delete()
+                    null
+                }
+            } catch (_: Exception) {
                 tmp.delete()
                 null
+            } finally {
+                runCatching { recorder?.stop() }
+                runCatching { grabber?.stop() }
+                runCatching { recorder?.release() }
+                runCatching { grabber?.release() }
+                _activeIds.value = _activeIds.value - song.id
             }
-        } catch (_: Exception) {
-            tmp.delete()
-            null
-        } finally {
-            runCatching { recorder?.stop() }
-            runCatching { grabber?.stop() }
-            runCatching { recorder?.release() }
-            runCatching { grabber?.release() }
-            _activeIds.value = _activeIds.value - song.id
         }
     }
 }

@@ -72,7 +72,9 @@ object MediaRepository {
             append(" OR ${MediaStore.Audio.Media.DATA} LIKE '%.wma'")
             append(" OR ${MediaStore.Audio.Media.DATA} LIKE '%.ape'")
             append(" OR ${MediaStore.Audio.Media.DATA} LIKE '%.wv')")
-            append(" AND ${MediaStore.Audio.Media.DURATION} >= 30000")
+            // 安卓扫描器解析不了 WMA 等格式，duration 可能是 NULL：
+            // NULL 参与比较恒为 false，会把 WMA 全部过滤掉，因此 NULL 一并保留
+            append(" AND (${MediaStore.Audio.Media.DURATION} >= 30000 OR ${MediaStore.Audio.Media.DURATION} IS NULL)")
             if (folderFilter.isNotEmpty()) {
                 append(" AND (")
                 folderFilter.forEachIndexed { index, path ->
