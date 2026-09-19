@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,7 +43,10 @@ import com.luna.music.BuildConfig
 import com.luna.music.MainViewModel
 import com.luna.music.data.ThemeMode
 import com.luna.music.data.UpdateManager
+import com.luna.music.playback.TranscodeManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,6 +147,40 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenScanFolders: () 
                     )
                 }
                 Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            // WMA/APE 转码缓存（仅 full 渠道会写入，lite 为空不显示）
+            var transcodedBytes by remember { mutableStateOf<Long?>(null) }
+            LaunchedEffect(Unit) {
+                transcodedBytes = withContext(Dispatchers.IO) {
+                    TranscodeManager.cacheDir(context).walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                }
+            }
+            val cacheBytes = transcodedBytes
+            if (cacheBytes != null && cacheBytes > 0L) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("清理转码缓存", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "已用 ${formatCacheSize(cacheBytes)}（WMA/APE 播放用，清理后首次点播需重新转换）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(onClick = {
+                        scope.launch {
+                            transcodedBytes = withContext(Dispatchers.IO) {
+                                TranscodeManager.cacheDir(context).listFiles()?.forEach { it.delete() }
+                                0L
+                            }
+                        }
+                    }) { Text("清理") }
+                }
             }
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
@@ -255,4 +293,11 @@ private fun SectionTitle(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(vertical = 4.dp),
     )
+}
+
+private fun formatCacheSize(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> "%.1f GB".format(bytes.toDouble() / (1L shl 30))
+    bytes >= 1L shl 20 -> "%.1f MB".format(bytes.toDouble() / (1L shl 20))
+    bytes >= 1L shl 10 -> "%d KB".format(bytes / (1L shl 10))
+    else -> "$bytes B"
 }

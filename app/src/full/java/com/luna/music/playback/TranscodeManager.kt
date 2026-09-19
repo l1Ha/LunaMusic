@@ -60,7 +60,8 @@ object TranscodeManager {
             recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC)
             recorder.setSampleRate(sampleRate)
             recorder.setAudioChannels(channels)
-            recorder.setAudioBitrate(192_000)
+            // 256k：源文件（WMA/APE）本就有损，用高码率把代际损失压到听感以下
+            recorder.setAudioBitrate(256_000)
             recorder.start()
 
             var frame: Frame? = grabber.grabFrame()

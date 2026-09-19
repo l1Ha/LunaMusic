@@ -2,6 +2,7 @@ package com.luna.music.ui.screens
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Bedtime
@@ -57,6 +60,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -107,6 +111,24 @@ fun NowPlayingScreen(
         value = withContext(Dispatchers.IO) { LyricsLoader.load(song) }
     }
 
+    // 封面横滑切歌：页数 = 队列长度，翻到哪页就播放哪首
+    val coverPager = rememberPagerState(
+        initialPage = nowIndex.coerceAtLeast(0),
+        pageCount = { PlayerBridge.queue.value.size },
+    )
+    LaunchedEffect(nowIndex, queue) {
+        if (queue.isNotEmpty() && coverPager.currentPage != nowIndex && !coverPager.isScrollInProgress) {
+            coverPager.animateScrollToPage(nowIndex)
+        }
+    }
+    LaunchedEffect(coverPager) {
+        snapshotFlow { coverPager.settledPage }.collect { page ->
+            if (queue.isNotEmpty() && page != nowIndex && page in queue.indices) {
+                PlayerBridge.seekToIndex(page)
+            }
+        }
+    }
+
     val bg = MaterialTheme.colorScheme.background
     val accent = MaterialTheme.colorScheme.primary
 
@@ -152,15 +174,35 @@ fun NowPlayingScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Spacer(Modifier.weight(0.7f))
-                            CoverImage(
-                                model = song.artworkUri,
-                                modifier = Modifier
-                                    .fillMaxWidth(0.85f)
-                                    .aspectRatio(1f)
-                                    .clip(MaterialTheme.shapes.extraLarge)
-                                    .clickable { showLyrics = true },
-                                shape = MaterialTheme.shapes.extraLarge,
-                            )
+                            if (queue.isEmpty()) {
+                                CoverImage(
+                                    model = song.artworkUri,
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.85f)
+                                        .aspectRatio(1f)
+                                        .clip(MaterialTheme.shapes.extraLarge)
+                                        .clickable { showLyrics = true },
+                                    shape = MaterialTheme.shapes.extraLarge,
+                                )
+                            } else {
+                                HorizontalPager(
+                                    state = coverPager,
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.85f)
+                                        .aspectRatio(1f),
+                                    pageSpacing = 16.dp,
+                                ) { page ->
+                                    val pageSong = queue.getOrNull(page) ?: song
+                                    CoverImage(
+                                        model = pageSong.artworkUri,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(MaterialTheme.shapes.extraLarge)
+                                            .clickable { showLyrics = true },
+                                        shape = MaterialTheme.shapes.extraLarge,
+                                    )
+                                }
+                            }
                             Spacer(Modifier.weight(0.7f))
 
                             Row(
@@ -172,15 +214,16 @@ fun NowPlayingScreen(
                                         song.title,
                                         style = MaterialTheme.typography.titleLarge,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.basicMarquee(),
                                     )
                                     Text(
                                         song.artist,
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.clickable(onClick = onOpenAlbum),
+                                        modifier = Modifier
+                                            .basicMarquee()
+                                            .clickable(onClick = onOpenAlbum),
                                     )
                                 }
                                 IconButton(onClick = { vm.toggleFavorite(song.id) }) {
