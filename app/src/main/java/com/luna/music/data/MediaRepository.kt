@@ -19,22 +19,34 @@ object MediaRepository {
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
-    suspend fun scan(context: Context, folderFilter: List<String> = emptyList()) = withContext(Dispatchers.IO) {
+    suspend fun scan(
+        context: Context,
+        folderFilter: List<String> = emptyList(),
+        excludedFolders: List<String> = emptyList(),
+    ) = withContext(Dispatchers.IO) {
         if (_isScanning.value) return@withContext
         _isScanning.value = true
         try {
-            _songs.value = querySongs(context, folderFilter)
+            _songs.value = querySongs(context, folderFilter, excludedFolders)
         } finally {
             _isScanning.value = false
         }
     }
 
     /** 列出（未过滤的）所有音频所在文件夹，供“指定扫描文件夹”使用。 */
-    suspend fun discoverFolders(context: Context): List<Folder> = withContext(Dispatchers.IO) {
-        foldersOf(querySongs(context))
-    }
+    suspend fun discoverFolders(context: Context, excludedFolders: List<String> = emptyList()): List<Folder> =
+        withContext(Dispatchers.IO) {
+            foldersOf(querySongs(context, excludedFolders = excludedFolders))
+        }
 
-    private fun querySongs(context: Context, folderFilter: List<String> = emptyList()): List<Song> {
+    private fun isExcluded(path: String, excludedFolders: List<String>): Boolean =
+        excludedFolders.any { ex -> path == ex || path.startsWith(ex.trimEnd('/') + "/") }
+
+    private fun querySongs(
+        context: Context,
+        folderFilter: List<String> = emptyList(),
+        excludedFolders: List<String> = emptyList(),
+    ): List<Song> {
         val result = mutableListOf<Song>()
         val collection =
             if (Build.VERSION.SDK_INT >= 29) {
@@ -88,6 +100,7 @@ object MediaRepository {
 
             while (c.moveToNext()) {
                 val path = c.getString(pathC) ?: continue
+                if (isExcluded(path, excludedFolders)) continue
                 result += Song(
                     id = c.getLong(idC),
                     title = c.getString(titleC)?.takeIf { it.isNotBlank() } ?: path.substringAfterLast('/'),

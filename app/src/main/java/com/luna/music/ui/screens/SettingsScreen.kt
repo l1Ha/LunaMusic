@@ -140,8 +140,13 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenScanFolders: () 
                 Column(Modifier.weight(1f)) {
                     Text("扫描文件夹", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        if (settings.scanFolders.isEmpty()) "扫描全部文件夹"
-                        else "已指定 ${settings.scanFolders.size} 个文件夹",
+                        buildString {
+                            append(
+                                if (settings.scanFolders.isEmpty()) "扫描全部文件夹"
+                                else "已指定 ${settings.scanFolders.size} 个文件夹",
+                            )
+                            if (settings.excludedFolders.isNotEmpty()) append("，已排除 ${settings.excludedFolders.size} 个")
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

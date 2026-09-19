@@ -64,6 +64,8 @@ data class AppSettings(
     val sortMode: SortMode = SortMode.TITLE,
     val sortAsc: Boolean = true,
     val scanFolders: List<String> = emptyList(),
+    // 排除文件夹（黑名单）：无论是否在扫描范围内，其中的音频都不扫描、不显示
+    val excludedFolders: List<String> = emptyList(),
 )
 
 enum class ThemeMode(val label: String) {

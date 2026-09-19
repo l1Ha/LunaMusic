@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FolderOff
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -54,10 +55,11 @@ fun ScanFoldersScreen(vm: MainViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val settings by vm.settings.collectAsState()
     val selected = settings.scanFolders
+    val excluded = settings.excludedFolders
     var discovered by remember { mutableStateOf<List<Folder>>(emptyList()) }
 
     LaunchedEffect(Unit) {
-        discovered = MediaRepository.discoverFolders(context)
+        discovered = MediaRepository.discoverFolders(context, excluded)
     }
 
     val folderLauncher = rememberLauncherForActivityResult(
@@ -74,10 +76,26 @@ fun ScanFoldersScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
     }
 
-    // 未选中、且不是已选目录子目录的快捷候选
+    val excludeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            val path = resolveTreePath(context, uri)
+            if (path != null) {
+                vm.addExcludedFolder(path)
+                Toast.makeText(context, "已排除：$path", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "无法识别该目录（仅支持内部存储 / SD 卡）", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // 未选中、不是已选目录子目录、也未处于排除范围内的快捷候选
     val candidates = discovered.filter { folder ->
         selected.none { sel ->
             folder.path == sel || folder.path.startsWith(sel.trimEnd('/') + "/")
+        } && excluded.none { ex ->
+            folder.path == ex || folder.path.startsWith(ex.trimEnd('/') + "/")
         }
     }
 
@@ -92,8 +110,13 @@ fun ScanFoldersScreen(vm: MainViewModel, onBack: () -> Unit) {
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Text(
-                    if (selected.isEmpty()) "当前扫描：全部文件夹（默认）"
-                    else "已指定 ${selected.size} 个文件夹，仅扫描其中的音乐",
+                    buildString {
+                        append(
+                            if (selected.isEmpty()) "当前扫描：全部文件夹（默认）"
+                            else "已指定 ${selected.size} 个文件夹，仅扫描其中的音乐",
+                        )
+                        if (excluded.isNotEmpty()) append("；已排除 ${excluded.size} 个文件夹")
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -159,6 +182,60 @@ fun ScanFoldersScreen(vm: MainViewModel, onBack: () -> Unit) {
                     }
                 }
                 item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            }
+
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item {
+                Text(
+                    "排除的文件夹",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                Text(
+                    "其中的音频不会扫描、也不会显示（优先于扫描范围）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                OutlinedButton(
+                    onClick = { excludeLauncher.launch(null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Icon(Icons.Rounded.FolderOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("选择要排除的目录")
+                }
+            }
+            items(excluded, key = { it }) { path ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Rounded.FolderOff,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(path.substringAfterLast('/').ifBlank { "/" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            path,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(onClick = { vm.removeExcludedFolder(path) }) {
+                        Icon(Icons.Rounded.Close, contentDescription = "取消排除", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
 
             if (candidates.isNotEmpty()) {

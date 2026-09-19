@@ -34,25 +34,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val songs = MediaRepository.songs
     val isScanning = MediaRepository.isScanning
 
+    private var stateLoaded = false
+
     init {
-        viewModelScope.launch {
-            _settings.value = store.loadSettings()
-            _favorites.value = store.loadFavorites()
-            _playlists.value = store.loadPlaylists()
-        }
+        viewModelScope.launch { loadState() }
+    }
+
+    /** 设置/收藏/播放列表只加载一次；权限流程与初始化都可能触发，先到先得，后到的直接跳过。 */
+    private suspend fun loadState() {
+        if (stateLoaded) return
+        val settings = store.loadSettings()
+        val favorites = store.loadFavorites()
+        val playlists = store.loadPlaylists()
+        _settings.value = settings
+        _favorites.value = favorites
+        _playlists.value = playlists
+        stateLoaded = true
     }
 
     fun onPermissionGranted() {
         if (_hasPermission.value) return
         _hasPermission.value = true
         viewModelScope.launch {
-            MediaRepository.scan(getApplication(), _settings.value.scanFolders)
+            // 必须等设置加载完成再扫描，否则 scanFolders / excludedFolders 还是默认空值
+            loadState()
+            startScan()
             PlayerBridge.restoreSavedQueue()
         }
     }
 
     fun rescan() {
-        viewModelScope.launch { MediaRepository.scan(getApplication(), _settings.value.scanFolders) }
+        viewModelScope.launch { startScan() }
+    }
+
+    private fun startScan() {
+        val s = _settings.value
+        viewModelScope.launch {
+            MediaRepository.scan(getApplication(), s.scanFolders, s.excludedFolders)
+        }
     }
 
     fun addScanFolder(path: String) {
@@ -67,6 +86,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearScanFolders() {
         updateSettings { it.copy(scanFolders = emptyList()) }
+        rescan()
+    }
+
+    fun addExcludedFolder(path: String) {
+        updateSettings { s ->
+            // 排除目录自身/其父级若在扫描列表里，一并移除，避免两边语义打架
+            s.copy(
+                excludedFolders = (s.excludedFolders + path).distinct(),
+                scanFolders = s.scanFolders.filterNot { it == path || it.startsWith(path.trimEnd('/') + "/") },
+            )
+        }
+        rescan()
+    }
+
+    fun removeExcludedFolder(path: String) {
+        updateSettings { it.copy(excludedFolders = it.excludedFolders - path) }
         rescan()
     }
 
