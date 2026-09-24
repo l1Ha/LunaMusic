@@ -149,7 +149,9 @@ object PlayerBridge {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             refreshCurrent()
             persistState()
-            if (_stopAfterCurrent.value) {
+            // 「播完本曲停止」只在自然播完（自动切歌）时生效；
+            // 错误跳过/手动切歌触发的 transition 不算，避免刚切歌就被暂停
+            if (_stopAfterCurrent.value && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 _stopAfterCurrent.value = false
                 _controller.value?.pause()
             }
@@ -165,6 +167,30 @@ object PlayerBridge {
 
         override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
             _speed.value = playbackParameters.speed
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            // 意外进入 IDLE（如错误处理后的状态抖动）时，若当前特殊格式曲目已有完整缓存则恢复播放，
+            // 避免表现为"播放着突然停了"
+            if (playbackState == Player.STATE_IDLE) {
+                val c = _controller.value ?: return
+                val idx = c.currentMediaItemIndex
+                val song = _queue.value.getOrNull(idx)
+                val ctx = appContext
+                if (song != null && ctx != null &&
+                    TranscodeManager.isUnsupported(song) &&
+                    TranscodeManager.hasCache(ctx, song) &&
+                    song.id !in pendingRetries
+                ) {
+                    scope.launch {
+                        runCatching {
+                            c.seekTo(idx, 0L)
+                            c.prepare()
+                            c.play()
+                        }
+                    }
+                }
+            }
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -226,14 +252,17 @@ object PlayerBridge {
         preTranscodeNext(idx)
     }
 
-    /** 后台预转码队列里的下一首特殊格式歌曲，切歌时无需等待 */
+    /** 后台预转码队列里接下来的特殊格式歌曲（最多 2 首），切歌时无需等待 */
     private fun preTranscodeNext(fromIndex: Int) {
         val ctx = appContext ?: return
-        val next = _queue.value.getOrNull(fromIndex + 1) ?: return
-        if (!TranscodeManager.isUnsupported(next) || TranscodeManager.hasCache(ctx, next)) return
-        if (next.id in TranscodeManager.activeIds.value) return
-        scope.launch(Dispatchers.IO) {
-            runCatching { TranscodeManager.transcode(ctx, next) }
+        val queue = _queue.value
+        for (offset in 1..2) {
+            val next = queue.getOrNull(fromIndex + offset) ?: return
+            if (!TranscodeManager.isUnsupported(next) || TranscodeManager.hasCache(ctx, next)) continue
+            if (next.id in TranscodeManager.activeIds.value) continue
+            scope.launch(Dispatchers.IO) {
+                runCatching { TranscodeManager.transcode(ctx, next) }
+            }
         }
     }
 
@@ -254,22 +283,56 @@ object PlayerBridge {
             return
         }
         if (songs.isEmpty()) return
-        val safeIndex = startIndex.coerceIn(0, songs.lastIndex)
-        val start = songs[safeIndex]
+        tryPlayFrom(songs, startIndex.coerceIn(0, songs.lastIndex))
+    }
+
+    /**
+     * 从 [from] 开始播放：
+     * 普通格式 / 已有缓存 → 直接播；
+     * 未转码的特殊格式 → 先转码再播（失败才自动推进到下一首，绝不静默）。
+     */
+    private fun tryPlayFrom(songs: List<Song>, from: Int) {
         val ctx = appContext
-        if (ctx != null && TranscodeManager.isUnsupported(start) && !TranscodeManager.hasCache(ctx, start)) {
-            _toast.value = "正在转换 ${start.title}（WMA/APE → AAC），完成后自动播放…"
-            scope.launch {
-                val file = withContext(Dispatchers.IO) { TranscodeManager.transcode(ctx, start) }
-                if (file != null) {
-                    playQueueNow(songs, safeIndex)
-                } else {
-                    _toast.value = "转码失败，无法播放 ${start.title}"
-                }
-            }
+        if (ctx == null) {
+            playQueueNow(songs, from)
             return
         }
-        playQueueNow(songs, safeIndex)
+        val song = songs.getOrNull(from)
+        if (song == null) {
+            _toast.value = "没有可播放的曲目"
+            return
+        }
+        if (!TranscodeManager.isUnsupported(song) || TranscodeManager.hasCache(ctx, song)) {
+            playQueueNow(songs, from)
+            return
+        }
+        convertThenPlay(songs, from)
+    }
+
+    /** 转码 songs[from]，成功后播放；失败则继续尝试下一首，整条队列都失败才提示。 */
+    private fun convertThenPlay(songs: List<Song>, from: Int) {
+        val ctx = appContext ?: return
+        val song = songs.getOrNull(from) ?: run {
+            _toast.value = "没有可播放的曲目"
+            return
+        }
+        if (!TranscodeManager.isUnsupported(song) || TranscodeManager.hasCache(ctx, song)) {
+            playQueueNow(songs, from)
+            return
+        }
+        _toast.value = "正在转换 ${song.title}（WMA/APE → AAC），完成后自动播放…"
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { TranscodeManager.transcode(ctx, song) } != null
+            if (ok) {
+                playQueueNow(songs, from)
+            } else if (from + 1 <= songs.lastIndex) {
+                // 这首转换失败：自动跳到下一首可播放的曲目，避免"点了一首却没声音"
+                _toast.value = "${song.title} 无法播放，已切换下一首"
+                tryPlayFrom(songs, from + 1)
+            } else {
+                _toast.value = "转码失败，无法播放 ${song.title}"
+            }
+        }
     }
 
     private fun playQueueNow(songs: List<Song>, startIndex: Int) {
@@ -330,7 +393,35 @@ object PlayerBridge {
     }
 
     fun seekToIndex(index: Int) {
-        _controller.value?.seekTo(index, 0L)
+        val c = _controller.value ?: return
+        val ctx = appContext
+        val song = _queue.value.getOrNull(index)
+        // 手动切歌（队列点击 / 封面滑动）到未转码的特殊格式：先转码再切，避免报错闪断
+        if (ctx != null && song != null &&
+            TranscodeManager.isUnsupported(song) &&
+            !TranscodeManager.hasCache(ctx, song)
+        ) {
+            if (pendingRetries.add(song.id)) {
+                _toast.value = "正在转换 ${song.title}（WMA/APE → AAC）…"
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { TranscodeManager.transcode(ctx, song) } != null
+                    pendingRetries.remove(song.id)
+                    if (ok) {
+                        _controller.value?.let { p ->
+                            if (p.currentMediaItemIndex != index) {
+                                p.seekTo(index, 0L)
+                                p.play()
+                            }
+                        }
+                    } else {
+                        _toast.value = "转码失败，无法播放 ${song.title}"
+                    }
+                }
+            }
+            return
+        }
+        c.seekTo(index, 0L)
+        c.play()
     }
 
     fun setShuffleEnabled(enabled: Boolean) {
