@@ -20,6 +20,10 @@ object UpdateManager {
     const val REPO = "l1Ha/LunaMusic"
     private const val API = "https://api.github.com/repos/$REPO/releases/latest"
 
+    /** lite 渠道包名不同（com.luna.music.lite），无法用完整版 APK 覆盖升级 */
+    val isLiteBuild: Boolean =
+        com.luna.music.BuildConfig.APPLICATION_ID.endsWith(".lite")
+
     data class Release(
         val version: String,
         val name: String,
@@ -47,23 +51,42 @@ object UpdateManager {
             val body = conn.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(body)
             val tag = json.optString("tag_name")
+            val version = tag.removePrefix("v")
             val assets = json.optJSONArray("assets") ?: return@runCatching null
-            var apk: JSONObject? = null
-            for (i in 0 until assets.length()) {
-                val a = assets.getJSONObject(i)
-                if (a.optString("name").endsWith(".apk")) {
-                    apk = a
-                    break
-                }
-            }
-            apk ?: return@runCatching null
+            val apk = selectApkAsset(assets, version) ?: return@runCatching null
             Release(
-                version = tag.removePrefix("v"),
+                version = version,
                 name = json.optString("name").ifBlank { tag },
                 downloadUrl = apk.optString("browser_download_url"),
                 size = apk.optLong("size"),
             )
         }.getOrNull()
+    }
+
+    /**
+     * 从 Release 资产中挑选完整版 APK。
+     * GitHub API 返回的资产顺序不保证与上传顺序一致（实测 lite 常常排在前面），
+     * 因此绝不能"取第一个 .apk"。优先级：
+     * 1. 精确匹配 LunaMusic-v<version>.apk / LunaMusic-<version>.apk
+     * 2. 任意非 lite 的 .apk
+     * 3. 兜底取任意 .apk
+     */
+    internal fun selectApkAsset(assets: org.json.JSONArray, version: String): JSONObject? {
+        val exactNames = setOf("LunaMusic-v$version.apk", "LunaMusic-$version.apk")
+        var fallback: JSONObject? = null
+        for (i in 0 until assets.length()) {
+            val a = assets.getJSONObject(i)
+            val name = a.optString("name")
+            if (!name.endsWith(".apk")) continue
+            if (fallback == null) fallback = a
+            if (name in exactNames) return a
+        }
+        for (i in 0 until assets.length()) {
+            val a = assets.getJSONObject(i)
+            val name = a.optString("name")
+            if (name.endsWith(".apk") && !name.contains("lite", ignoreCase = true)) return a
+        }
+        return fallback
     }
 
     suspend fun download(context: Context, release: Release): File? = withContext(Dispatchers.IO) {

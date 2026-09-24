@@ -202,6 +202,12 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenScanFolders: () 
                 }
                 OutlinedButton(
                     onClick = {
+                        if (UpdateManager.isLiteBuild) {
+                            updateStatus = UpdateManager.UpdateStatus.Error(
+                                "轻量版不支持应用内更新，请在 GitHub Releases 下载完整版（两者可共存）",
+                            )
+                            return@OutlinedButton
+                        }
                         updateStatus = UpdateManager.UpdateStatus.Checking
                         scope.launch {
                             val release = UpdateManager.check()
