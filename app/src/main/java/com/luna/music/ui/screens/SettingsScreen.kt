@@ -50,7 +50,12 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenScanFolders: () -> Unit) {
+fun SettingsScreen(
+    vm: MainViewModel,
+    onBack: () -> Unit,
+    onOpenScanFolders: () -> Unit,
+    onOpenPlaybackLog: () -> Unit = {},
+) {
     val settings by vm.settings.collectAsState()
     val isScanning by vm.isScanning.collectAsState()
     val songCount by vm.songs.collectAsState()
@@ -186,6 +191,26 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenScanFolders: () 
                         }
                     }) { Text("清理") }
                 }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            SectionTitle("诊断")
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenPlaybackLog)
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("播放日志", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "记录暂停/恢复的原因与播放错误，便于定位播放问题",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))

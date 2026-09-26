@@ -13,8 +13,8 @@ android {
         applicationId = "com.luna.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.5.3"
+        versionCode = 12
+        versionName = "1.6.0"
 
         ndk {
             // 只保留手机主流 ABI（arm64），避免 FFmpeg 原生库让 APK 翻倍

@@ -146,9 +146,29 @@ object PlayerBridge {
             if (!isPlaying) persistState()
         }
 
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // 记录"为什么暂停/恢复"，是排查播放异常的关键线索
+            val song = _currentSong.value?.title ?: "无曲目"
+            when {
+                playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ->
+                    PlaybackEventLog.log("▶ 恢复播放（手动）[$song]")
+                playWhenReady -> PlaybackEventLog.log("▶ 恢复播放 [$song]")
+                reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ->
+                    PlaybackEventLog.log("⏸ 暂停：音频焦点被其他应用抢占 [$song]")
+                reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY ->
+                    PlaybackEventLog.log("⏸ 暂停：耳机拔出或蓝牙断开 [$song]")
+                reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ->
+                    PlaybackEventLog.log("⏸ 暂停（手动）[$song]")
+                else -> PlaybackEventLog.log("⏸ 暂停：reason=$reason [$song]")
+            }
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             refreshCurrent()
             persistState()
+            _currentSong.value?.let {
+                PlaybackEventLog.log("→ 切歌：${it.title}")
+            }
             // 「播完本曲停止」只在自然播完（自动切歌）时生效；
             // 错误跳过/手动切歌触发的 transition 不算，避免刚切歌就被暂停
             if (_stopAfterCurrent.value && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
@@ -182,6 +202,7 @@ object PlayerBridge {
                     TranscodeManager.hasCache(ctx, song) &&
                     song.id !in pendingRetries
                 ) {
+                    PlaybackEventLog.log("↺ 意外空闲，自动恢复播放 [${song.title}]")
                     scope.launch {
                         runCatching {
                             c.seekTo(idx, 0L)
@@ -197,6 +218,7 @@ object PlayerBridge {
             val c = _controller.value ?: return
             val idx = c.currentMediaItemIndex
             val song = _queue.value.getOrNull(idx)
+            PlaybackEventLog.log("✖ 播放错误：${error.errorCodeName} ${error.message ?: ""} [${song?.title ?: "未知"}]")
             val ctx = appContext
             // 未转码的 WMA/APE/WV：打开的是尚不存在的缓存文件，先转换再重试本曲，而不是跳过
             if (song != null && ctx != null &&
@@ -261,7 +283,15 @@ object PlayerBridge {
             if (!TranscodeManager.isUnsupported(next) || TranscodeManager.hasCache(ctx, next)) continue
             if (next.id in TranscodeManager.activeIds.value) continue
             scope.launch(Dispatchers.IO) {
+                val startAt = System.currentTimeMillis()
                 runCatching { TranscodeManager.transcode(ctx, next) }
+                    .onSuccess { file ->
+                        if (file != null) {
+                            PlaybackEventLog.log("⟳ 预转码完成：${next.title}（${System.currentTimeMillis() - startAt}ms）")
+                        } else {
+                            PlaybackEventLog.log("✖ 预转码失败：${next.title}（${System.currentTimeMillis() - startAt}ms）")
+                        }
+                    }
             }
         }
     }
@@ -321,8 +351,13 @@ object PlayerBridge {
             return
         }
         _toast.value = "正在转换 ${song.title}（WMA/APE → AAC），完成后自动播放…"
+        val startAt = System.currentTimeMillis()
         scope.launch {
             val ok = withContext(Dispatchers.IO) { TranscodeManager.transcode(ctx, song) } != null
+            PlaybackEventLog.log(
+                if (ok) "⟳ 转码完成：${song.title}（${System.currentTimeMillis() - startAt}ms）"
+                else "✖ 转码失败：${song.title}（${System.currentTimeMillis() - startAt}ms）",
+            )
             if (ok) {
                 playQueueNow(songs, from)
             } else if (from + 1 <= songs.lastIndex) {
