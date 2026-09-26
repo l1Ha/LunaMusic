@@ -49,6 +49,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _settings.value = settings
         _favorites.value = favorites
         _playlists.value = playlists
+        PlayerBridge.autoResumeAfterFocusLoss = settings.autoResumeAfterFocusLoss
         stateLoaded = true
     }
 
@@ -108,6 +109,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
         val next = transform(_settings.value)
         _settings.value = next
+        PlayerBridge.autoResumeAfterFocusLoss = next.autoResumeAfterFocusLoss
         viewModelScope.launch { store.saveSettings(next) }
     }
 

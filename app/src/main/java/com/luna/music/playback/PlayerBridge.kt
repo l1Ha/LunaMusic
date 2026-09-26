@@ -2,6 +2,7 @@ package com.luna.music.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.media.AudioManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -21,6 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -89,6 +91,59 @@ object PlayerBridge {
 
     /** 正在“报错→转码→重试”中的歌曲，防止同一首重复触发多条恢复流程 */
     private val pendingRetries = mutableSetOf<Long>()
+
+    // ---- 音频焦点丢失后的自动续播 ----
+    /** 可由设置页开关（MainViewModel 同步），默认开启 */
+    @Volatile
+    var autoResumeAfterFocusLoss = true
+
+    private var pausedByFocusLoss = false
+    private var focusResumeJob: Job? = null
+
+    private fun audioManager(): AudioManager? =
+        appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+    /**
+     * 焦点被抢占导致暂停后，周期性探测焦点是否已释放：
+     * 抢占方（来电、其他播放器）释放焦点后自动续播，不必手动按播放。
+     * 上限 10 分钟，防止长时间无意义的轮询。
+     */
+    private fun scheduleFocusAutoResume() {
+        if (!autoResumeAfterFocusLoss) return
+        val am = audioManager() ?: return
+        focusResumeJob?.cancel()
+        focusResumeJob = scope.launch {
+            val startAt = System.currentTimeMillis()
+            while (kotlinx.coroutines.currentCoroutineContext().isActive &&
+                pausedByFocusLoss && autoResumeAfterFocusLoss
+            ) {
+                if (System.currentTimeMillis() - startAt > 600_000) {
+                    PlaybackEventLog.log("⏸ 焦点丢失超过 10 分钟，停止自动续播尝试")
+                    break
+                }
+                val listener = AudioManager.OnAudioFocusChangeListener { }
+                val granted = runCatching {
+                    am.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+                }.getOrDefault(AudioManager.AUDIOFOCUS_REQUEST_FAILED) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+                if (granted) {
+                    runCatching { am.abandonAudioFocus(listener) }
+                    if (pausedByFocusLoss) {
+                        pausedByFocusLoss = false
+                        PlaybackEventLog.log("↻ 音频焦点恢复，自动续播")
+                        _controller.value?.play()
+                    }
+                    break
+                }
+                delay(3_000)
+            }
+        }
+    }
+
+    private fun cancelFocusAutoResume() {
+        pausedByFocusLoss = false
+        focusResumeJob?.cancel()
+        focusResumeJob = null
+    }
 
     fun clearError() {
         _error.value = null
@@ -160,6 +215,12 @@ object PlayerBridge {
                 reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ->
                     PlaybackEventLog.log("⏸ 暂停（手动）[$song]")
                 else -> PlaybackEventLog.log("⏸ 暂停：reason=$reason [$song]")
+            }
+            if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) {
+                pausedByFocusLoss = true
+                scheduleFocusAutoResume()
+            } else if (playWhenReady) {
+                cancelFocusAutoResume()
             }
         }
 

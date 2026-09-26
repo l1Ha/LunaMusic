@@ -30,6 +30,8 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+        // 预加载下一曲前 5 秒：普通格式（MP3/FLAC 等）切歌时零等待，消除曲间停顿
+        player.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(5_000_000L))
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(
                 PendingIntent.getActivity(

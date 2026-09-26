@@ -66,6 +66,8 @@ data class AppSettings(
     val scanFolders: List<String> = emptyList(),
     // 排除文件夹（黑名单）：无论是否在扫描范围内，其中的音频都不扫描、不显示
     val excludedFolders: List<String> = emptyList(),
+    // 被来电/其他应用抢占音频焦点后，焦点释放时自动继续播放
+    val autoResumeAfterFocusLoss: Boolean = true,
 )
 
 enum class ThemeMode(val label: String) {

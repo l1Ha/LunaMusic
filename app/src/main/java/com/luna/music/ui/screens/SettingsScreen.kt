@@ -194,6 +194,30 @@ fun SettingsScreen(
             }
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            SectionTitle("播放")
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("焦点恢复后自动续播", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "被其他应用长时间占用音频焦点时，对方释放后自动继续播放（来电等短暂打断由系统自动恢复）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.autoResumeAfterFocusLoss,
+                    onCheckedChange = { checked ->
+                        vm.updateSettings { s -> s.copy(autoResumeAfterFocusLoss = checked) }
+                    },
+                )
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
             SectionTitle("诊断")
             Row(
                 Modifier
